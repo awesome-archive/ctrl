@@ -1,6 +1,60 @@
 # CTRL - A Conditional Transformer Language Model for Controllable Generation
 Authors: [Nitish Shirish Keskar](http://keskarnitish.github.io), [Bryan McCann](https://bmccann.github.io/), [Lav Varshney](http://www.varshney.csl.illinois.edu/), [Caiming Xiong](http://www.stat.ucla.edu/~caiming/), and [Richard Socher](https://www.socher.org/)
 
+![](ctrl.gif)
+
+## Updates
+
+**Oct 31, 2019**
+
+Adding functionality to convert a model from TF to HuggingFace/Transformers in response to [a request](https://github.com/huggingface/transformers/issues/1654). To convert the checkpoint, simply install transformers via `pip install transformers` and run `python -u convert_tf_to_huggingface_pytorch.py --tf <path_to_tensorflow_data_checkpoint> --pytorch <path_to_where_you_want_to_store_pytorch_checkpoint>`
+
+Then, to use this in HuggingFace:
+
+```
+# create folder and contents for HuggingFace/Transformers
+mkdir custom_ctrl_model
+cd custom_ctrl_model
+mv <path_to_pytorch_checkpoint_from_above> .
+wget -O config.json https://storage.googleapis.com/sf-ctrl/pytorch/ctrl-config.json
+wget -O merges.txt https://raw.githubusercontent.com/salesforce/ctrl/master/ctrl-merges.txt
+wget -O vocab.json https://raw.githubusercontent.com/salesforce/ctrl/master/ctrl-vocab.json
+
+# run
+python examples/run_generation.py  --model_type ctrl --model_name <path_to_custom_ctrl_model>/ --temperature 0 --repetition 1.2
+```
+
+**Oct 21, 2019**
+
+CTRL is now in [hugginface/transformers](https://github.com/huggingface/transformers)!
+
+You can simply follow the installation instructions and run:
+
+```
+python examples/run_generation.py  --model_type ctrl --model_name ctrl --temperature 0 --repetition 1.2
+```
+
+**Sep 25, 2019**
+
+Two more additions:
+
+1. We add the code to fine-tune the model on a custom dataset in the `training_utils` folder. Please refer to the README within the folder for details and example usage. 
+
+2. You can get a 36-layer model from `gs://sf-ctrl/seqlen256_36layers_v0.ckpt/`; the generation of this model is markedly worse than the 48-layer (base) model but still quite coherent. 
+
+**Sep 23, 2019**
+
+The repo now supports (experimental) inference on PyTorch; Collaboratory: https://colab.research.google.com/drive/1nDh3ayRPJGK5ciPO2D3TFkYZFqclBWHY. Simply install PyTorch via `pip install torch` and run `python pytorch_generation.py` with the same flags as the base `generation.py` script except one exception: unlike the base version, here, the `model_path` requires the path to the `.data` file and not just the ckpt folder (see collaboratory for example).
+The code will convert the weights from TensorFlow in the first run and then create a loadable checkpoint for easier subsequent loading. You still need Tensorflow installed for the first step. 
+
+**Sep 19, 2019**
+
+You should now be able to run inference on K80/T4/P100/similar GPUs using the `lower_memory` branch. We quantized certain weights to `fp16` which reduced memory usage. Simply clone the repo and `git checkout lower_memory`. Here is a collaboratory link that demonstrates this functionality: https://colab.research.google.com/drive/1hVveBQShDru1Mjnhe4C21uQv4A2eH1tV
+
+This functionality is being tested, please file GitHub issues if you see something aberrent. We still recommend using the full model if possible. Once the functionality has been sufficiently tested, we will update the repo and merge into `master`. 
+
+Two quick notes: (1) Unlike the base version, here, the `model_path` requires the path to the `.data` file and not just the ckpt folder (see collaboratory for example), (2) the first generation is slow because of overhead in setting up the model but the subsequent ones should be fast.
+
 ## Introduction
 
 
@@ -9,7 +63,7 @@ users cannot easily control this generation process. We release *CTRL*, a 1.6 bi
 transformer language model, trained to condition on control codes that specify
 domain, subdomain, entities, relationships between entities, dates, and task-specific behavior. Control codes were derived from structure that naturally co-occurs with raw text, preserving the advantages of unsupervised learning while providing more explicit control over text generation.
 
-Paper link: [pre-print](https://einstein.ai/presentations/ctrl.pdf)
+Paper link: https://arxiv.org/abs/1909.05858
 
 Blog link: https://blog.einstein.ai/introducing-a-conditional-transformer-language-model-for-controllable-generation/
 
@@ -36,7 +90,7 @@ Please refer to the argument flags for more details regarding the options availa
 @article{keskarCTRL2019,
   title={{CTRL - A Conditional Transformer Language Model for Controllable Generation}},
   author={Keskar, Nitish Shirish and McCann, Bryan and Varshney, Lav and Xiong, Caiming and Socher, Richard},
-  journal={arXiv preprint arXiv:1909},
+  journal={arXiv preprint arXiv:1909.05858},
   year={2019}
 }
 ```
@@ -84,18 +138,26 @@ This code relies on [TensorFlow 1.14](https://www.tensorflow.org/install) and [f
 
 TensorFlow can be installed via `pip install tensorflow[-gpu]==1.14`. fastBPE installation instructions can be found in the GitHub repository linked above. We highly recommend experimenting within a virtualenv or Docker image. 
 
+**For inference on PyTorch, please see the update on `Sep 23` at the top of this README. If you use PyTorch, you can skip Step 2.**
+
 2. Patch the `/usr/local/lib/python2.7/dist-packages/tensorflow_estimator/python/estimator/keras.py` (or equivalent, if installed elsewhere) by running 
 
 ```patch -b <path_to_tensorflow_estimator_package>/python/estimator/keras.py estimator.patch```
 
 We highly recommend experimenting within a virtualenv or Docker image since the workflow involves patching a TensorFlow file to support some custom functionality. This step is not optional; skipping this step will cause errors (irrespective of device).
 
+If you run into OOM issues because of GPU memory exhaustion, please use the `lower_memory` branch. See the (Sep 19, 2019) update at the top of this README for details. 
+
 
 3. Get the model files from `gs://sf-ctrl/seqlen256_v1.ckpt/` or `gs://sf-ctrl/seqlen512_v1.ckpt/`.
 
-The model architecture is identical for both checkpoints. The former is trained with lower training sequence length (256) while the latter is trained with a larger one (512). We plan to update the models (with the appropriate version tags) as we continue to train them longer and on more data. Our current recommendation is to use the `256_v1` model unless you have a strong reason not to. 
+A 36-layer model is also available at `gs://sf-ctrl/seqlen256_36layers_v0.ckpt/`. 
+
+The model architecture is identical for both checkpoints. The former is trained with lower training sequence length (256) while the latter is trained with a larger one (512). We plan to update the models (with the appropriate version tags) as we continue to train them longer and on more data. **Our current recommendation is to use the `256_v1` model unless you have a strong reason not to. If you have no preference for domain, `Links` is always a good first choice.**
 
 [With `gsutil` installed](https://cloud.google.com/storage/docs/gsutil_install), you can simply run `gsutil -m cp -r gs://sf-ctrl/seqlen256_v1.ckpt/ .` for copying the model checkpoint over. 
+
+Without `gsutil`, you can follow the route recommended @ https://github.com/salesforce/ctrl/issues/7#issuecomment-531303214
 
 4. Run the generation script `generation.py` or the source attribution script `source_attribution.py`. 
 
@@ -331,11 +393,15 @@ Confessions ppl = 133.619834
 
 1. Will you be releasing the training code and data?
 
-We plan to release the training code soon. We will not be releasing the training data, but we will release tips and scripts related to data collection.
+~~We plan to release the training code soon.~~
+Please refer to the update on `Sep 25` for details on training code.
+
+We will not be releasing the training data, but we will release tips and scripts related to data collection.
 
 2. Is a version of the model available in PyTorch? 
 
-Not at the moment, but if we come across an equivalent implementation, we will update this section. 
+~~Not at the moment, but if we come across an equivalent implementation, we will update this section.~~
+Please refer to the update on `Sep 23` for inference on PyTorch. 
 
 3. The code errors out.
 
